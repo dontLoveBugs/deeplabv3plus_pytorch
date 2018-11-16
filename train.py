@@ -8,6 +8,7 @@ from collections import OrderedDict
 # PyTorch includes
 import torch
 from torch.autograd import Variable
+import torch.nn as nn
 import torch.optim as optim
 from torchvision import transforms
 from torch.utils.data import DataLoader
@@ -23,27 +24,26 @@ from dataloaders import utils
 from networks import deeplab_xception, deeplab_resnet
 from dataloaders import custom_transforms as tr
 
+# set gpu
+gpu_id = 1
 
-
-gpu_id = 0
-print('Using GPU: {} '.format(gpu_id))
 # Setting parameters
-use_sbd = True  # Whether to use SBD dataset
+use_sbd = False  # Whether to use SBD dataset
 nEpochs = 100  # Number of epochs for training
 resume_epoch = 0   # Default is 0, change if want to resume
 
 p = OrderedDict()  # Parameters to include in report
-p['trainBatch'] = 6  # Training batch size
-testBatch = 6  # Testing batch size
+p['trainBatch'] = 8  # Training batch size
+testBatch = 1  # Testing batch size
 useTest = True  # See evolution of the test set when training
 nTestInterval = 5 # Run on test set every nTestInterval epochs
 snapshot = 10  # Store a model every snapshot epochs
 p['nAveGrad'] = 1  # Average the gradient of several iterations
-p['lr'] = 1e-7  # Learning rate
+p['lr'] = 0.07  # Learning rate
 p['wd'] = 5e-4  # Weight decay
 p['momentum'] = 0.9  # Momentum
 p['epoch_size'] = 10  # How many epochs to change learning rate
-backbone = 'xception' # Use xception or resnet as feature extractor,
+backbone = 'resnet' # Use xception or resnet as feature extractor,
 
 save_dir_root = os.path.join(os.path.dirname(os.path.abspath(__file__)))
 exp_name = os.path.dirname(os.path.abspath(__file__)).split('/')[-1]
@@ -78,9 +78,20 @@ else:
         torch.load(os.path.join(save_dir, 'models', modelName + '_epoch-' + str(resume_epoch - 1) + '.pth'),
                    map_location=lambda storage, loc: storage)) # Load all tensors onto the CPU
 
-if gpu_id >= 0:
-    torch.cuda.set_device(device=gpu_id)
+# if gpu_id >= 0:
+#     torch.cuda.set_device(device=gpu_id)
+#     net.cuda()
+
+if torch.cuda.device_count() > 1:
+    print("Let's use", torch.cuda.device_count(), "GPUs!")
+    p['trainBatch'] = p['trainBatch'] * torch.cuda.device_count()
+    net = nn.DataParallel(net).cuda()
+else:
+    print("Let's use", torch.cuda.current_device())
     net.cuda()
+
+use_gpu = torch.cuda.is_available()
+
 
 if resume_epoch != nEpochs:
     # Logging into Tensorboard
@@ -113,7 +124,7 @@ if resume_epoch != nEpochs:
     else:
         db_train = voc_train
 
-    trainloader = DataLoader(db_train, batch_size=p['trainBatch'], shuffle=True, num_workers=0)
+    trainloader = DataLoader(db_train, batch_size=p['trainBatch'], shuffle=True, num_workers=10)
     testloader = DataLoader(voc_val, batch_size=testBatch, shuffle=False, num_workers=0)
 
     utils.generate_param_report(os.path.join(save_dir, exp_name + '.txt'), p)
@@ -139,14 +150,13 @@ if resume_epoch != nEpochs:
         for ii, sample_batched in enumerate(trainloader):
 
             inputs, labels = sample_batched['image'], sample_batched['label']
-            # Forward-Backward of the mini-batch
-            inputs, labels = Variable(inputs, requires_grad=True), Variable(labels)
             global_step += inputs.data.shape[0]
 
-            if gpu_id >= 0:
+            if use_gpu:
                 inputs, labels = inputs.cuda(), labels.cuda()
 
-            outputs = net.forward(inputs)
+            torch.cuda.synchronize()
+            outputs = net(inputs)
 
             loss = criterion(outputs, labels, size_average=False, batch_average=True)
             running_loss_tr += loss.item()
@@ -172,6 +182,8 @@ if resume_epoch != nEpochs:
                 optimizer.step()
                 optimizer.zero_grad()
                 aveGrad = 0
+
+            torch.cuda.synchronize()
 
             # Show 10 * 3 images results each epoch
             if ii % (num_img_tr // 10) == 0:
@@ -223,6 +235,5 @@ if resume_epoch != nEpochs:
                     print('Loss: %f' % running_loss_ts)
                     print('MIoU: %f\n' % miou)
                     running_loss_ts = 0
-
 
     writer.close()
