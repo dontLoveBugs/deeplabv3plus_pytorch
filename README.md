@@ -1,16 +1,18 @@
-# pytorch-deeplab-xception
+# deeplabv3+ implemented in Pytorch 4.0
+This repository is forked from jfzhang95/pytorch-deeplab-xception, and I add the vocaug dataset, and use new trainning strategy.
 
 ### TODO
 - [x] Basic deeplab v3+ model, using modified xception as backbone
 - [x] Training deeplab v3+ on Pascal VOC 2012, SBD, Cityscapes datasets
 - [x] Results evaluation on Pascal VOC 2012 test set
 - [x] Deeplab v3+ model using resnet as backbone
+- [x] Trainning deeplab v3+ on VOCAug dataset
 
 
 ### Introduction
 This is a PyTorch(0.4.0) implementation of [DeepLab-V3-Plus](https://arxiv.org/pdf/1802.02611). It
-can use Modified Aligned Xception and ResNet as backbone. Currently, we train DeepLab V3 Plus
-using Pascal VOC 2012, SBD and Cityscapes datasets.
+can use Modified Aligned Xception and ResNet as backbone. Currently, we can train DeepLab V3 Plus
+using Pascal VOC 2012, Pascal VOCAug, SBD and Cityscapes datasets.
 
 ![Results](doc/results.png)
 
