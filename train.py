@@ -19,7 +19,7 @@ from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
 # Custom includes
-from dataloaders import pascal, sbd, combine_dbs
+from dataloaders import pascal, sbd, VOCAug, combine_dbs
 from dataloaders import utils
 from networks import deeplab_xception, deeplab_resnet
 from dataloaders import custom_transforms as tr
@@ -29,8 +29,16 @@ gpu_id = 1
 
 # Setting parameters
 use_sbd = False  # Whether to use SBD dataset
-nEpochs = 100  # Number of epochs for training
+nEpochs = 30  # Number of epochs for training
 resume_epoch = 0   # Default is 0, change if want to resume
+# ["pascal", "vocaug"]
+dataset = 'vocaug'
+crop_size = 512 * 512
+
+'''
+先用vocaug训练30 epoch
+再用voc offcial 训练300epoch 
+'''
 
 p = OrderedDict()  # Parameters to include in report
 p['trainBatch'] = 8  # Training batch size
@@ -114,8 +122,12 @@ if resume_epoch != nEpochs:
         tr.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         tr.ToTensor()])
 
-    voc_train = pascal.VOCSegmentation(split='train', transform=composed_transforms_tr)
-    voc_val = pascal.VOCSegmentation(split='val', transform=composed_transforms_ts)
+    if dataset == "vocaug":
+        voc_train = VOCAug.VOCAug(split='train', transform=composed_transforms_tr)
+        voc_val = VOCAug.VOCAug(split='val', transform=composed_transforms_ts)
+    else:
+        voc_train = pascal.VOCSegmentation(split='train', transform=composed_transforms_tr)
+        voc_val = pascal.VOCSegmentation(split='val', transform=composed_transforms_ts)
 
     if use_sbd:
         print("Using SBD dataset")
@@ -129,28 +141,26 @@ if resume_epoch != nEpochs:
 
     utils.generate_param_report(os.path.join(save_dir, exp_name + '.txt'), p)
 
-    num_img_tr = len(trainloader)
-    num_img_ts = len(testloader)
+    num_img_tr = len(trainloader)  # 训练集样本batch数
+    num_img_ts = len(testloader)   # 测试集样本batch数
     running_loss_tr = 0.0
     running_loss_ts = 0.0
+    running_loss_ep = 0.0
     aveGrad = 0
     global_step = 0
+    print('训练样本数为', num_img_tr)
+    print('测试样本数为', num_img_ts)
+    max_iter = num_img_tr * nEpochs * p['trainBatch']
     print("Training Network")
 
     # Main Training and Testing Loop
     for epoch in range(resume_epoch, nEpochs):
         start_time = timeit.default_timer()
-
-        if epoch % p['epoch_size'] == p['epoch_size'] - 1:
-            lr_ = utils.lr_poly(p['lr'], epoch, nEpochs, 0.9)
-            print('(poly lr policy) learning rate: ', lr_)
-            optimizer = optim.SGD(net.parameters(), lr=lr_, momentum=p['momentum'], weight_decay=p['wd'])
-
         net.train()
         for ii, sample_batched in enumerate(trainloader):
-
             inputs, labels = sample_batched['image'], sample_batched['label']
             global_step += inputs.data.shape[0]
+            lr_ = utils.update_ploy_lr(optimizer, p['lr'], global_step, max_iter)
 
             if use_gpu:
                 inputs, labels = inputs.cuda(), labels.cuda()
@@ -159,17 +169,9 @@ if resume_epoch != nEpochs:
             outputs = net(inputs)
 
             loss = criterion(outputs, labels, size_average=False, batch_average=True)
+            step_loss = loss.item() / crop_size
             running_loss_tr += loss.item()
-
-            # Print stuff
-            if ii % num_img_tr == (num_img_tr - 1):
-                running_loss_tr = running_loss_tr / num_img_tr
-                writer.add_scalar('data/total_loss_epoch', running_loss_tr, epoch)
-                print('[Epoch: %d, numImages: %5d]' % (epoch, ii * p['trainBatch'] + inputs.data.shape[0]))
-                print('Loss: %f' % running_loss_tr)
-                running_loss_tr = 0
-                stop_time = timeit.default_timer()
-                print("Execution time: " + str(stop_time - start_time) + "\n")
+            running_loss_ep += loss.item()
 
             # Backward the averaged gradient
             loss /= p['nAveGrad']
@@ -178,15 +180,28 @@ if resume_epoch != nEpochs:
 
             # Update the weights once in p['nAveGrad'] forward passes
             if aveGrad % p['nAveGrad'] == 0:
-                writer.add_scalar('data/total_loss_iter', loss.item(), ii + num_img_tr * epoch)
+                writer.add_scalar('Train/loss_per_step', step_loss, ii + num_img_tr * epoch)
                 optimizer.step()
                 optimizer.zero_grad()
                 aveGrad = 0
 
             torch.cuda.synchronize()
 
+            # Print stuff
+            # 每10个batch_size 输出信息
+            if ii % 10 == 0:
+                running_loss_tr = running_loss_tr / 10 / crop_size
+                print('[Epoch:%d [%d/%d], numImages: %5d]' % (epoch, ii, num_img_tr , ii * p['trainBatch'] + inputs.data.shape[0]))
+                print('(poly lr policy) learning rate: ', lr_)
+                print('Loss: %f' % running_loss_tr)
+                running_loss_tr = 0
+                stop_time = timeit.default_timer()
+                print("Execution time: " + str(stop_time - start_time) + "\n")
+                start_time = timeit.default_timer()
+
             # Show 10 * 3 images results each epoch
-            if ii % (num_img_tr // 10) == 0:
+            # 每轮epoch输出可视化结果
+            if ii % num_img_tr == (num_img_tr - 1):
                 grid_image = make_grid(inputs[:3].clone().cpu().data, 3, normalize=True)
                 writer.add_image('Image', grid_image, global_step)
                 grid_image = make_grid(utils.decode_seg_map_sequence(torch.max(outputs[:3], 1)[1].detach().cpu().numpy()), 3, normalize=False,
@@ -194,6 +209,9 @@ if resume_epoch != nEpochs:
                 writer.add_image('Predicted label', grid_image, global_step)
                 grid_image = make_grid(utils.decode_seg_map_sequence(torch.squeeze(labels[:3], 1).detach().cpu().numpy()), 3, normalize=False, range=(0, 255))
                 writer.add_image('Groundtruth label', grid_image, global_step)
+
+        running_loss_ep = running_loss_ep / num_img_tr
+        writer.add_scalar('Train/loss_per_epoch', running_loss_ep / crop_size, epoch)
 
         # Save the model
         if (epoch % snapshot) == snapshot - 1:
@@ -230,8 +248,8 @@ if resume_epoch != nEpochs:
 
                     print('Validation:')
                     print('[Epoch: %d, numImages: %5d]' % (epoch, ii * testBatch + inputs.data.shape[0]))
-                    writer.add_scalar('data/test_loss_epoch', running_loss_ts, epoch)
-                    writer.add_scalar('data/test_miour', miou, epoch)
+                    writer.add_scalar('Test/test_loss_epoch', running_loss_ts, epoch)
+                    writer.add_scalar('Test/test_miour', miou, epoch)
                     print('Loss: %f' % running_loss_ts)
                     print('MIoU: %f\n' % miou)
                     running_loss_ts = 0

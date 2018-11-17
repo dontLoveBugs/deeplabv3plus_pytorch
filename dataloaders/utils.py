@@ -14,8 +14,9 @@ def recursive_glob(rootdir='.', suffix=''):
         :param suffix is the suffix to be searched
     """
     return [os.path.join(looproot, filename)
-        for looproot, _, filenames in os.walk(rootdir)
-        for filename in filenames if filename.endswith(suffix)]
+            for looproot, _, filenames in os.walk(rootdir)
+            for filename in filenames if filename.endswith(suffix)]
+
 
 def get_cityscapes_labels():
     return np.array([
@@ -39,6 +40,7 @@ def get_cityscapes_labels():
         [0, 80, 100],
         [0, 0, 230],
         [119, 11, 32]])
+
 
 def get_pascal_labels():
     """Load the mapping that associates pascal classes with label colors
@@ -78,6 +80,7 @@ def decode_seg_map_sequence(label_masks, dataset='pascal'):
     rgb_masks = torch.from_numpy(np.array(rgb_masks).transpose([0, 3, 1, 2]))
     return rgb_masks
 
+
 def decode_segmap(label_mask, dataset, plot=False):
     """Decode segmentation class labels into a color image
     Args:
@@ -89,6 +92,9 @@ def decode_segmap(label_mask, dataset, plot=False):
         (np.ndarray, optional): the resulting decoded color image.
     """
     if dataset == 'pascal':
+        n_classes = 21
+        label_colours = get_pascal_labels()
+    elif dataset == 'vocaug':
         n_classes = 21
         label_colours = get_pascal_labels()
     elif dataset == 'cityscapes':
@@ -114,11 +120,13 @@ def decode_segmap(label_mask, dataset, plot=False):
     else:
         return rgb
 
+
 def generate_param_report(logfile, param):
     log_file = open(logfile, 'w')
     for key, val in param.items():
         log_file.write(key + ':' + str(val) + '\n')
     log_file.close()
+
 
 def cross_entropy2d(logit, target, ignore_index=255, weight=None, size_average=True, batch_average=True):
     n, c, h, w = logit.size()
@@ -127,7 +135,8 @@ def cross_entropy2d(logit, target, ignore_index=255, weight=None, size_average=T
     if weight is None:
         criterion = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, size_average=False)
     else:
-        criterion = nn.CrossEntropyLoss(weight=torch.from_numpy(np.array(weight)).float().cuda(), ignore_index=ignore_index, size_average=False)
+        criterion = nn.CrossEntropyLoss(weight=torch.from_numpy(np.array(weight)).float().cuda(),
+                                        ignore_index=ignore_index, size_average=False)
     loss = criterion(logit, target.long())
 
     if size_average:
@@ -138,8 +147,17 @@ def cross_entropy2d(logit, target, ignore_index=255, weight=None, size_average=T
 
     return loss
 
+
 def lr_poly(base_lr, iter_, max_iter=100, power=0.9):
     return base_lr * ((1 - float(iter_) / max_iter) ** power)
+
+
+# ploy策略的学习率更新
+def update_ploy_lr(optimizer, initialized_lr, current_step, max_step, power=0.9):
+    lr = initialized_lr * ((1 - float(current_step) / max_step) ** (power))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr
 
 
 def get_iou(pred, gt, n_classes=21):

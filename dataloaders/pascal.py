@@ -44,8 +44,8 @@ class VOCSegmentation(Dataset):
                 lines = f.read().splitlines()
 
             for ii, line in enumerate(lines):
-                _image = os.path.join(self._image_dir, line + ".jpg")
-                _cat = os.path.join(self._cat_dir, line + ".png")
+                _image = os.path.join(self._image_dir, line + ".jpg") # 原图路径
+                _cat = os.path.join(self._cat_dir, line + ".png")     # groudth 路径
                 assert os.path.isfile(_image)
                 assert os.path.isfile(_cat)
                 self.im_ids.append(line)
