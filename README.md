@@ -1,5 +1,5 @@
 # deeplabv3+ implemented in Pytorch 4.0
-This repository is forked from jfzhang95/pytorch-deeplab-xception, and I add the vocaug dataset, and use new trainning strategy.
+This repository is forked from https://github.com/jfzhang95/pytorch-deeplab-xception, and I add the vocaug dataset, and use new trainning strategy.
 
 ### TODO
 - [x] Basic deeplab v3+ model, using modified xception as backbone
@@ -22,8 +22,8 @@ The code was tested with Anaconda and Python 3.5. After installing the Anaconda 
 
 0. Clone the repo:
     ```Shell
-    git clone https://github.com/jfzhang95/pytorch-deeplab-xception.git
-    cd pytorch-deeplab-xception
+    git clone git@github.com:dontLoveBugs/deeplabv3plus_pytorch.git
+    cd deeplabv3plus_pytorch
     ```
 
 1. Install dependencies:
